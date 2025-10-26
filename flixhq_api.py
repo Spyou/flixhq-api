@@ -16,6 +16,7 @@ import logging
 import re
 import os
 import sys
+import requests
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -109,6 +110,39 @@ class FlixHQAPI:
             logger.error(f"❌ Search failed: {e}")
             return []
     
+    def _get_stream_url_from_ajax(self, ajax_url):
+        """
+        This dude takes the ajax URL and gets the real streaming link 💪
+        """
+        try:
+            logger.info(f"🔗 Fetching real stream URL from ajax...")
+            
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Referer': 'https://flixhq-tv.lol/',
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+            
+            response = requests.get(ajax_url, headers=headers, timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                if 'link' in data:
+                    stream_url = data['link']
+                    logger.info(f"✓ Got real stream URL! 🎉")
+                    return stream_url
+                else:
+                    logger.warning(f"⚠️ No 'link' in ajax response")
+                    return ajax_url
+            else:
+                logger.warning(f"⚠️ Ajax failed with status {response.status_code}")
+                return ajax_url
+                
+        except Exception as e:
+            logger.error(f"❌ Ajax fetch failed: {e}")
+            return ajax_url
+    
     def get_details_with_servers(self, movie_url):
         try:
             logger.info(f"📽️ Getting movie details...")
@@ -181,7 +215,8 @@ class FlixHQAPI:
                             if data_id.startswith('/'):
                                 data_id = f"https://flixhq-tv.lol{data_id}"
                             elif not data_id.startswith('http') and data_id.isdigit():
-                                data_id = f"https://flixhq-tv.lol/ajax/episode/servers/{data_id}"
+                                ajax_url = f"https://flixhq-tv.lol/ajax/episode/servers/{data_id}"
+                                data_id = self._get_stream_url_from_ajax(ajax_url)
                             
                             stream_servers.append({
                                 'server': server_name,
@@ -233,9 +268,13 @@ class FlixHQAPI:
                     """)
                     
                     for js_server in js_servers:
-                        server_url = js_server['id']
-                        if server_url and server_url.isdigit():
-                            server_url = f"https://flixhq-tv.lol/ajax/episode/servers/{server_url}"
+                        server_id = js_server['id']
+                        
+                        if server_id and server_id.isdigit():
+                            ajax_url = f"https://flixhq-tv.lol/ajax/episode/servers/{server_id}"
+                            server_url = self._get_stream_url_from_ajax(ajax_url)
+                        else:
+                            server_url = server_id
                         
                         server_text_lower = js_server['name'].lower()
                         if 'upcloud' in server_text_lower:
