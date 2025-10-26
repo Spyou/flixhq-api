@@ -1,6 +1,0 @@
-services:
-  - type: web
-    name: flixhq-api
-    env: python
-    buildCommand: bash .render-build.sh
-    startCommand: gunicorn flixhq_api:app
