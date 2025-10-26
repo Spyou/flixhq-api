@@ -5,11 +5,13 @@ RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
     unzip \
-    && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
-    && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list \
+    ca-certificates \
+    && wget -q https://dl.google.com/linux/linux_signing_key.pub -O /tmp/google.pub \
+    && gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg /tmp/google.pub \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
     && apt-get update \
     && apt-get install -y google-chrome-stable \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* /tmp/google.pub
 
 # Set working directory
 WORKDIR /app
@@ -23,8 +25,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy app files
 COPY . .
 
-# Expose port
-EXPOSE 10000
+# Expose port (Railway uses dynamic PORT)
+EXPOSE 8080
 
 # Run the app
-CMD ["gunicorn", "--bind", "0.0.0.0:10000", "--timeout", "120", "flixhq_api:app"]
+CMD gunicorn flixhq_api:app --bind 0.0.0.0:$PORT --timeout 120 --workers 1
