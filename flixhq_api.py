@@ -142,14 +142,14 @@ class FlixHQAPI:
             stream_servers = []
             
             try:
-                logger.info("🎥 Hunting for UpCloud and VidCloud servers...")
+                logger.info("🎥 Hunting for UpCloud, VidCloud, and MegaCloud...")
                 
                 try:
                     WebDriverWait(self.driver, 10).until(
                         EC.presence_of_element_located((By.CSS_SELECTOR, "[class*='server'], [data-id]"))
                     )
                 except:
-                    logger.info("⏳ Servers taking time to load...")
+                    logger.info("⏳ Servers taking time to load, chill...")
                 
                 self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
                 time.sleep(2)
@@ -162,10 +162,10 @@ class FlixHQAPI:
                     element_text = element.get_text(strip=True).lower()
                     element_classes = ' '.join(element.get('class', [])).lower()
                     
-                    is_server = any(keyword in element_text or keyword in element_classes 
-                                   for keyword in ['upcloud', 'vidcloud', 'server'])
+                    is_target_server = any(keyword in element_text or keyword in element_classes 
+                                          for keyword in ['upcloud', 'vidcloud', 'megacloud'])
                     
-                    if is_server:
+                    if is_target_server:
                         data_id = element.get('data-id') or element.get('data-linkid') or element.get('href')
                         
                         if data_id:
@@ -173,8 +173,10 @@ class FlixHQAPI:
                                 server_name = 'UpCloud'
                             elif 'vidcloud' in element_text:
                                 server_name = 'VidCloud'
+                            elif 'megacloud' in element_text:
+                                server_name = 'MegaCloud'
                             else:
-                                server_name = element_text.title() or 'Unknown Server'
+                                continue
                             
                             if data_id.startswith('/'):
                                 data_id = f"https://flixhq-tv.lol{data_id}"
@@ -196,29 +198,33 @@ class FlixHQAPI:
                         if not iframe_src.startswith('http'):
                             iframe_src = f"https:{iframe_src}" if iframe_src.startswith('//') else iframe_src
                         
-                        server_name = 'Unknown'
+                        server_name = None
                         if 'upcloud' in iframe_src.lower():
                             server_name = 'UpCloud'
                         elif 'vidcloud' in iframe_src.lower():
                             server_name = 'VidCloud'
+                        elif 'megacloud' in iframe_src.lower():
+                            server_name = 'MegaCloud'
                         
-                        stream_servers.append({
-                            'server': server_name,
-                            'url': iframe_src,
-                            'type': 'iframe'
-                        })
-                        
-                        logger.info(f"✓ Found iframe: {server_name}")
+                        if server_name:
+                            stream_servers.append({
+                                'server': server_name,
+                                'url': iframe_src,
+                                'type': 'iframe'
+                            })
+                            
+                            logger.info(f"✓ Found iframe: {server_name}")
                 
                 try:
                     js_servers = self.driver.execute_script("""
                         var servers = [];
                         document.querySelectorAll('[data-id], [data-linkid]').forEach(function(el) {
-                            var text = el.innerText || el.textContent || '';
+                            var text = (el.innerText || el.textContent || '').toLowerCase();
                             var dataId = el.getAttribute('data-id') || el.getAttribute('data-linkid');
-                            if (text.toLowerCase().includes('upcloud') || text.toLowerCase().includes('vidcloud')) {
+                            
+                            if (text.includes('upcloud') || text.includes('vidcloud') || text.includes('megacloud')) {
                                 servers.push({
-                                    name: text.trim(),
+                                    name: el.innerText.trim(),
                                     id: dataId
                                 });
                             }
@@ -231,12 +237,22 @@ class FlixHQAPI:
                         if server_url and server_url.isdigit():
                             server_url = f"https://flixhq-tv.lol/ajax/episode/servers/{server_url}"
                         
+                        server_text_lower = js_server['name'].lower()
+                        if 'upcloud' in server_text_lower:
+                            server_name = 'UpCloud'
+                        elif 'vidcloud' in server_text_lower:
+                            server_name = 'VidCloud'
+                        elif 'megacloud' in server_text_lower:
+                            server_name = 'MegaCloud'
+                        else:
+                            continue
+                        
                         stream_servers.append({
-                            'server': js_server['name'],
+                            'server': server_name,
                             'url': server_url,
                             'type': 'javascript'
                         })
-                        logger.info(f"✓ JS found: {js_server['name']}")
+                        logger.info(f"✓ JS found: {server_name}")
                         
                 except Exception as js_error:
                     logger.warning(f"⚠️ JavaScript extraction failed: {js_error}")
@@ -319,7 +335,7 @@ class FlixHQAPI:
     def close(self):
         if self.driver:
             self.driver.quit()
-            logger.info("✓ Chrome closed, bye! 👋")
+            logger.info("✓ Chrome closed, peace out! 👋")
 
 
 scraper = None
@@ -337,6 +353,7 @@ def home():
         'name': 'FlixHQ API',
         'version': '1.0.0',
         'message': '🎬 Your movie scraper is live!',
+        'supported_servers': ['UpCloud', 'VidCloud', 'MegaCloud'],
         'endpoints': {
             'health': '/api/health',
             'trending': '/api/trending?limit=20',
@@ -427,7 +444,7 @@ def get_details():
 
 if __name__ == '__main__':
     print("=" * 60)
-    print("🎬 FlixHQ API - UpCloud & VidCloud Scraper")
+    print("🎬 FlixHQ API - UpCloud, VidCloud & MegaCloud")
     print("=" * 60)
     print("\n📡 Endpoints:")
     print("  GET /")
@@ -443,6 +460,6 @@ if __name__ == '__main__':
     try:
         app.run(debug=False, host='0.0.0.0', port=port)
     except KeyboardInterrupt:
-        print("\n👋 Shutting down...")
+        print("\n👋 Shutting down, catch you later!")
         if scraper:
             scraper.close()
