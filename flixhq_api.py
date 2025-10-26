@@ -369,11 +369,14 @@ if __name__ == '__main__':
     print("  GET /api/trending?limit=20")
     print("  GET /api/search?q=keyword")
     print("  GET /api/details?url=<movie_url>")
-    print("\nStarting on http://0.0.0.0:5000")
+    
+    # Railway provides PORT as environment variable
+    port = int(os.getenv('PORT', 8080))
+    print(f"\nStarting on port {port}")
     print("=" * 60)
     
     try:
-        port = int(os.getenv('PORT', 5000))
+        # Use gunicorn for production (Railway will use CMD from Dockerfile)
         app.run(debug=False, host='0.0.0.0', port=port)
     except KeyboardInterrupt:
         print("\nShutting down...")
