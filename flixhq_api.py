@@ -9,7 +9,6 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
 import time
 import random
@@ -52,6 +51,7 @@ class FlixHQAPI:
         for path in possible_chrome_paths:
             if path and os.path.exists(path):
                 chrome_binary = path
+                logger.info(f"Found Chrome at: {path}")
                 break
         
         if chrome_binary:
@@ -63,12 +63,24 @@ class FlixHQAPI:
         ]
         chrome_options.add_argument(f'user-agent={random.choice(user_agents)}')
         
-        self.driver = webdriver.Chrome(
-            service=Service(ChromeDriverManager().install()),
-            options=chrome_options
-        )
-        self.driver.set_page_load_timeout(30)
-        logger.info("✓ Chrome initialized")
+        # Try to initialize Chrome
+        try:
+            # Try without webdriver-manager first (for Railway)
+            self.driver = webdriver.Chrome(options=chrome_options)
+            self.driver.set_page_load_timeout(30)
+            logger.info("✓ Chrome initialized (system chromedriver)")
+        except Exception as e1:
+            logger.warning(f"System chromedriver failed: {e1}")
+            try:
+                # Try with webdriver-manager (for local)
+                from webdriver_manager.chrome import ChromeDriverManager
+                service = Service(ChromeDriverManager().install())
+                self.driver = webdriver.Chrome(service=service, options=chrome_options)
+                self.driver.set_page_load_timeout(30)
+                logger.info("✓ Chrome initialized (webdriver-manager)")
+            except Exception as e2:
+                logger.error(f"Both methods failed: {e2}")
+                raise
     
     def clean_title(self, title):
         """Clean movie title"""
@@ -116,7 +128,7 @@ class FlixHQAPI:
         """Get TMDB ID for VidSrc"""
         try:
             clean_title = self.clean_title(title)
-            api_key = os.getenv('TMDB_API_KEY', '8d6d91941230817f7807d643736e8a49')
+            api_key = os.getenv('TMDB_API_KEY', 'fab792d6c5936a7332045ca4565c7353')
             
             params = {
                 'api_key': api_key,
@@ -220,13 +232,13 @@ class FlixHQAPI:
             logger.info(f"🎬 Movie: {movie_title} ({details.get('year', 'N/A')})")
             
             # ============================================================
-            # EXTRACT FLIXHQ UPCLOUD & VIDCLOUD SERVERS 🔥
+            # EXTRACT FLIXHQ SERVERS
             # ============================================================
             
             stream_servers = []
             
             try:
-                logger.info("Looking for UpCloud and VidCloud servers...")
+                logger.info("Looking for FlixHQ servers...")
                 
                 # Find all server selection elements
                 server_elements = self.driver.find_elements(By.CSS_SELECTOR, 
@@ -236,25 +248,17 @@ class FlixHQAPI:
                 
                 for element in server_elements:
                     try:
-                        # Get server name/text
                         server_text = element.text.strip().lower()
                         
-                        # Check if it's UpCloud or VidCloud
                         if 'upcloud' in server_text or 'vidcloud' in server_text or 'megacloud' in server_text:
                             logger.info(f"Found server: {server_text}")
                             
-                            # Try to click the server button
                             try:
                                 element.click()
-                                time.sleep(2)  # Wait for iframe to load
+                                time.sleep(2)
                                 
-                                # Get the new page source
                                 new_soup = BeautifulSoup(self.driver.page_source, 'html.parser')
-                                
-                                # Find iframe
-                                iframe = new_soup.find('iframe', id=lambda x: x and 'iframe' in str(x).lower())
-                                if not iframe:
-                                    iframe = new_soup.find('iframe')
+                                iframe = new_soup.find('iframe')
                                 
                                 if iframe:
                                     iframe_src = iframe.get('src') or iframe.get('data-src')
@@ -271,37 +275,19 @@ class FlixHQAPI:
                                             'type': 'iframe'
                                         })
                                         
-                                        logger.info(f"✓ Extracted {server_name}: {iframe_src[:50]}...")
+                                        logger.info(f"✓ Extracted {server_name}")
                                 
                             except Exception as click_error:
-                                logger.warning(f"Could not click server button: {click_error}")
+                                logger.warning(f"Click failed: {click_error}")
                     
                     except Exception as element_error:
                         continue
                 
-                # Alternative method: Look for data attributes
-                soup = BeautifulSoup(self.driver.page_source, 'html.parser')
-                
-                # Find UpCloud/VidCloud/MegaCloud links
-                for server_name in ['upcloud', 'vidcloud', 'megacloud']:
-                    elements = soup.find_all(lambda tag: tag.name in ['a', 'button', 'div'] and 
-                                             (server_name in str(tag.get('class', '')).lower() or 
-                                              server_name in tag.get_text().lower()))
-                    
-                    for elem in elements:
-                        data_id = elem.get('data-id') or elem.get('data-linkid') or elem.get('href')
-                        if data_id:
-                            stream_servers.append({
-                                'server': server_name.title(),
-                                'url': data_id,
-                                'type': 'link_id'
-                            })
-                
             except Exception as server_error:
-                logger.error(f"Error extracting servers: {server_error}")
+                logger.error(f"Server extraction error: {server_error}")
             
             # ============================================================
-            # ADD VIDSRC STREAMS 🎯
+            # ADD VIDSRC STREAMS
             # ============================================================
             
             logger.info("Adding VidSrc streams...")
@@ -320,7 +306,7 @@ class FlixHQAPI:
             details['servers'] = unique_servers
             details['server_count'] = len(unique_servers)
             
-            logger.info(f"🎉 Total: {len(unique_servers)} servers (FlixHQ + VidSrc)")
+            logger.info(f"🎉 Total: {len(unique_servers)} servers")
             
             return details
             
@@ -408,8 +394,8 @@ def get_scraper():
 def home():
     return jsonify({
         'name': 'FlixHQ + VidSrc API',
-        'version': '10.0.0',
-        'message': '🎬 FlixHQ (UpCloud/VidCloud/MegaCloud) + VidSrc!',
+        'version': '10.1.0',
+        'message': '🎬 FlixHQ + VidSrc (Railway Fixed)',
         'sources': ['FlixHQ: UpCloud, VidCloud, MegaCloud', 'VidSrc.to', 'VidSrc.pro', 'VidSrc.xyz'],
         'endpoints': {
             'health': '/api/health',
@@ -425,7 +411,7 @@ def health():
     """Health check"""
     return jsonify({
         'status': 'ok',
-        'message': '✅ FlixHQ + VidSrc API running'
+        'message': '✅ API running'
     })
 
 
@@ -478,12 +464,7 @@ def search():
 
 @app.route('/api/details', methods=['GET'])
 def get_details():
-    """
-    Get movie details with FlixHQ + VidSrc servers
-    
-    Example:
-        GET /api/details?url=https://flixhq-tv.lol/movie/watch-avengers-2012
-    """
+    """Get movie details with servers"""
     try:
         url = request.args.get('url', '').strip()
         
@@ -508,15 +489,8 @@ def get_details():
 
 if __name__ == '__main__':
     print("=" * 60)
-    print("🎬 FlixHQ + VidSrc API v10.0")
+    print("🎬 FlixHQ + VidSrc API v10.1")
     print("=" * 60)
-    print("\n✅ FlixHQ: UpCloud, VidCloud, MegaCloud")
-    print("✅ VidSrc.to, VidSrc.pro, VidSrc.xyz")
-    print("\nEndpoints:")
-    print("  GET /api/health")
-    print("  GET /api/trending?limit=20")
-    print("  GET /api/search?q=keyword")
-    print("  GET /api/details?url=<movie_url>")
     
     port = int(os.getenv('PORT', 8080))
     print(f"\n🚀 Starting on port {port}")
