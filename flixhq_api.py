@@ -130,7 +130,7 @@ class FlixHQAPI:
             clean_title = self.clean_title(title)
             logger.info(f"🔍 Searching jumpfreedom.com: {clean_title}")
             
-            # jumpfreedom.com = Free TMDB proxy
+            # Free TMDB proxy
             search_url = "https://jumpfreedom.com/3/search/movie"
             params = {'query': clean_title}
             if year:
@@ -242,10 +242,6 @@ class FlixHQAPI:
             
             logger.info(f"🎬 Movie: {movie_title} ({details.get('year', 'N/A')})")
             
-            # ============================================================
-            # EXTRACT FLIXHQ SERVERS
-            # ============================================================
-            
             stream_servers = []
             
             try:
@@ -296,10 +292,8 @@ class FlixHQAPI:
                 
             except Exception as server_error:
                 logger.error(f"Server extraction error: {server_error}")
-            
-            # ============================================================
+        
             # ADD VIDSRC STREAMS
-            # ============================================================
             
             logger.info("Adding VidSrc streams...")
             tmdb_id = self.get_tmdb_id(movie_title, details.get('year'))
@@ -397,9 +391,7 @@ def get_scraper():
     return scraper
 
 
-# ============================================================
 # API ENDPOINTS
-# ============================================================
 
 @app.route('/', methods=['GET'])
 def home():
@@ -422,7 +414,7 @@ def health():
     """Health check"""
     return jsonify({
         'status': 'ok',
-        'message': '✅ API running'
+        'message': 'API running'
     })
 
 
