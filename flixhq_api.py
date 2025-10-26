@@ -6,6 +6,8 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
 from webdriver_manager.chrome import ChromeDriverManager
 import time
@@ -23,7 +25,6 @@ CORS(app)
 
 
 class FlixHQAPI:
-    """Scraper for FlixHQ with UpCloud/VidCloud extraction"""
     
     def __init__(self):
         chrome_options = Options()
@@ -35,7 +36,6 @@ class FlixHQAPI:
         chrome_options.add_argument('--disable-extensions')
         chrome_options.add_argument('--disable-setuid-sandbox')
         
-        # Detect Chrome/Chromium binary
         possible_chrome_paths = [
             '/usr/bin/google-chrome',
             '/usr/bin/google-chrome-stable',
@@ -52,9 +52,7 @@ class FlixHQAPI:
         
         if chrome_binary:
             chrome_options.binary_location = chrome_binary
-            logger.info(f"✓ Using Chrome binary: {chrome_binary}")
-        else:
-            logger.info("Chrome binary not found, using default system Chrome")
+            logger.info(f"✓ Chrome spotted at: {chrome_binary}")
         
         user_agents = [
             'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0',
@@ -68,57 +66,54 @@ class FlixHQAPI:
                 options=chrome_options
             )
             self.driver.set_page_load_timeout(30)
-            logger.info("✓ Chrome initialized with ChromeDriverManager")
+            logger.info("✓ Chrome ready to scrape! 🎬")
         except Exception as e1:
             logger.warning(f"ChromeDriverManager failed: {e1}")
             try:
                 self.driver = webdriver.Chrome(options=chrome_options)
                 self.driver.set_page_load_timeout(30)
-                logger.info("✓ Chrome initialized with system chromedriver")
+                logger.info("✓ Using system chromedriver")
             except Exception as e2:
-                logger.error(f"All Chrome initialization failed: {e2}")
+                logger.error(f"Chrome init failed completely: {e2}")
                 sys.exit(1)
     
     def scrape_home(self, limit=20):
-        """Get trending movies from home page"""
         try:
             url = "https://flixhq-tv.lol/home"
-            logger.info(f"Scraping home page: {url}")
+            logger.info(f"🏠 Visiting home page...")
             self.driver.get(url)
             time.sleep(random.uniform(2, 3))
             
             soup = BeautifulSoup(self.driver.page_source, 'html.parser')
             items = self._extract_items(soup)
             
-            logger.info(f"✓ Found {len(items)} items on home page")
+            logger.info(f"✓ Grabbed {len(items)} movies! 🍿")
             return items[:limit] if limit else items
         except Exception as e:
-            logger.error(f"Error scraping home: {e}")
+            logger.error(f"❌ Home scraping failed: {e}")
             return []
     
     def search(self, keyword, limit=20):
-        """Search movies by keyword"""
         try:
             search_url = f"https://flixhq-tv.lol/search/{keyword.replace(' ', '-')}"
-            logger.info(f"Searching for: {keyword}")
+            logger.info(f"🔍 Searching for: {keyword}")
             self.driver.get(search_url)
             time.sleep(random.uniform(2, 3))
             
             soup = BeautifulSoup(self.driver.page_source, 'html.parser')
             items = self._extract_items(soup)
             
-            logger.info(f"✓ Found {len(items)} results for '{keyword}'")
+            logger.info(f"✓ Found {len(items)} results! 🎯")
             return items[:limit] if limit else items
         except Exception as e:
-            logger.error(f"Error searching: {e}")
+            logger.error(f"❌ Search failed: {e}")
             return []
     
     def get_details_with_servers(self, movie_url):
-        """Get movie details and streaming servers"""
         try:
-            logger.info(f"Getting details for: {movie_url}")
+            logger.info(f"📽️ Getting movie details...")
             self.driver.get(movie_url)
-            time.sleep(3)
+            time.sleep(5)
             
             soup = BeautifulSoup(self.driver.page_source, 'html.parser')
             details = {}
@@ -147,72 +142,107 @@ class FlixHQAPI:
             stream_servers = []
             
             try:
-                logger.info("Looking for UpCloud and VidCloud servers...")
+                logger.info("🎥 Hunting for UpCloud and VidCloud servers...")
                 
-                server_elements = self.driver.find_elements(By.CSS_SELECTOR, 
-                    'a.btn, button.btn, div[data-id], a[data-id], a[data-linkid], .server-item, .server-name, [class*="server"]')
+                try:
+                    WebDriverWait(self.driver, 10).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "[class*='server'], [data-id]"))
+                    )
+                except:
+                    logger.info("⏳ Servers taking time to load...")
                 
-                logger.info(f"Found {len(server_elements)} potential servers")
-                
-                for element in server_elements:
-                    try:
-                        server_text = element.text.strip().lower()
-                        if 'upcloud' in server_text or 'vidcloud' in server_text:
-                            logger.info(f"Found server: {server_text}")
-                            try:
-                                element.click()
-                                time.sleep(2)
-                                new_soup = BeautifulSoup(self.driver.page_source, 'html.parser')
-                                iframe = new_soup.find('iframe', id=lambda x: x and 'iframe' in str(x).lower())
-                                if not iframe:
-                                    iframe = new_soup.find('iframe')
-                                
-                                if iframe:
-                                    iframe_src = iframe.get('src') or iframe.get('data-src')
-                                    if iframe_src:
-                                        if not iframe_src.startswith('http'):
-                                            iframe_src = f"https:{iframe_src}" if iframe_src.startswith('//') else f"https://flixhq-tv.lol{iframe_src}"
-                                        
-                                        server_name = 'UpCloud' if 'upcloud' in server_text else 'VidCloud'
-                                        stream_servers.append({
-                                            'server': server_name,
-                                            'url': iframe_src,
-                                            'type': 'iframe'
-                                        })
-                                        logger.info(f"✓ Extracted {server_name}: {iframe_src[:50]}...")
-                            except Exception as click_error:
-                                logger.warning(f"Could not click server: {click_error}")
-                    except Exception:
-                        continue
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(2)
                 
                 soup = BeautifulSoup(self.driver.page_source, 'html.parser')
                 
-                upcloud_elements = soup.find_all(lambda tag: tag.name in ['a', 'button', 'div'] and 
-                                                 ('upcloud' in str(tag.get('class', '')).lower() or 
-                                                  'upcloud' in tag.get_text().lower()))
-                for elem in upcloud_elements:
-                    data_id = elem.get('data-id') or elem.get('data-linkid') or elem.get('href')
-                    if data_id:
-                        stream_servers.append({
-                            'server': 'UpCloud',
-                            'url': data_id,
-                            'type': 'link_id'
-                        })
+                all_elements = soup.find_all(['a', 'button', 'div', 'li', 'span'])
                 
-                vidcloud_elements = soup.find_all(lambda tag: tag.name in ['a', 'button', 'div'] and 
-                                                  ('vidcloud' in str(tag.get('class', '')).lower() or 
-                                                   'vidcloud' in tag.get_text().lower()))
-                for elem in vidcloud_elements:
-                    data_id = elem.get('data-id') or elem.get('data-linkid') or elem.get('href')
-                    if data_id:
+                for element in all_elements:
+                    element_text = element.get_text(strip=True).lower()
+                    element_classes = ' '.join(element.get('class', [])).lower()
+                    
+                    is_server = any(keyword in element_text or keyword in element_classes 
+                                   for keyword in ['upcloud', 'vidcloud', 'server'])
+                    
+                    if is_server:
+                        data_id = element.get('data-id') or element.get('data-linkid') or element.get('href')
+                        
+                        if data_id:
+                            if 'upcloud' in element_text:
+                                server_name = 'UpCloud'
+                            elif 'vidcloud' in element_text:
+                                server_name = 'VidCloud'
+                            else:
+                                server_name = element_text.title() or 'Unknown Server'
+                            
+                            if data_id.startswith('/'):
+                                data_id = f"https://flixhq-tv.lol{data_id}"
+                            elif not data_id.startswith('http') and data_id.isdigit():
+                                data_id = f"https://flixhq-tv.lol/ajax/episode/servers/{data_id}"
+                            
+                            stream_servers.append({
+                                'server': server_name,
+                                'url': data_id,
+                                'type': 'server_link'
+                            })
+                            
+                            logger.info(f"✓ Found {server_name}!")
+                
+                iframes = soup.find_all('iframe')
+                for iframe in iframes:
+                    iframe_src = iframe.get('src') or iframe.get('data-src')
+                    if iframe_src:
+                        if not iframe_src.startswith('http'):
+                            iframe_src = f"https:{iframe_src}" if iframe_src.startswith('//') else iframe_src
+                        
+                        server_name = 'Unknown'
+                        if 'upcloud' in iframe_src.lower():
+                            server_name = 'UpCloud'
+                        elif 'vidcloud' in iframe_src.lower():
+                            server_name = 'VidCloud'
+                        
                         stream_servers.append({
-                            'server': 'VidCloud',
-                            'url': data_id,
-                            'type': 'link_id'
+                            'server': server_name,
+                            'url': iframe_src,
+                            'type': 'iframe'
                         })
+                        
+                        logger.info(f"✓ Found iframe: {server_name}")
+                
+                try:
+                    js_servers = self.driver.execute_script("""
+                        var servers = [];
+                        document.querySelectorAll('[data-id], [data-linkid]').forEach(function(el) {
+                            var text = el.innerText || el.textContent || '';
+                            var dataId = el.getAttribute('data-id') || el.getAttribute('data-linkid');
+                            if (text.toLowerCase().includes('upcloud') || text.toLowerCase().includes('vidcloud')) {
+                                servers.push({
+                                    name: text.trim(),
+                                    id: dataId
+                                });
+                            }
+                        });
+                        return servers;
+                    """)
+                    
+                    for js_server in js_servers:
+                        server_url = js_server['id']
+                        if server_url and server_url.isdigit():
+                            server_url = f"https://flixhq-tv.lol/ajax/episode/servers/{server_url}"
+                        
+                        stream_servers.append({
+                            'server': js_server['name'],
+                            'url': server_url,
+                            'type': 'javascript'
+                        })
+                        logger.info(f"✓ JS found: {js_server['name']}")
+                        
+                except Exception as js_error:
+                    logger.warning(f"⚠️ JavaScript extraction failed: {js_error}")
                 
             except Exception as server_error:
-                logger.error(f"Error extracting servers: {server_error}")
+                logger.error(f"❌ Server extraction failed: {server_error}")
             
             unique_servers = []
             seen_urls = set()
@@ -224,16 +254,19 @@ class FlixHQAPI:
             details['servers'] = unique_servers
             details['server_count'] = len(unique_servers)
             
-            logger.info(f"✓ Found {len(unique_servers)} servers")
+            logger.info(f"🎉 Total servers found: {len(unique_servers)}")
             
             return details
             
         except Exception as e:
-            logger.error(f"Error getting details: {e}")
-            return {}
+            logger.error(f"❌ Details extraction failed: {e}")
+            return {
+                'error': str(e),
+                'servers': [],
+                'server_count': 0
+            }
     
     def _extract_items(self, soup):
-        """Extract movie or TV items"""
         items = []
         containers = soup.find_all('div', class_='flw-item')
         if not containers:
@@ -241,16 +274,18 @@ class FlixHQAPI:
         if not containers:
             all_links = soup.find_all('a', href=True)
             containers = [link for link in all_links if link.find('img')]
+        
         for container in containers:
             item = self._parse_item(container)
             if item:
                 items.append(item)
+        
         return items
     
     def _parse_item(self, container):
-        """Parse single movie/TV item"""
         try:
             item = {}
+            
             link = container if container.name == 'a' else container.find('a', href=True)
             if link and link.get('href'):
                 item['link'] = link['href']
@@ -266,28 +301,30 @@ class FlixHQAPI:
             if not title:
                 img = container.find('img')
                 title = img.get('alt') if img else None
+            
             if not title:
                 return None
+            
             item['title'] = title
             
             img = container.find('img')
             item['thumbnail'] = img.get('data-src') or img.get('src') if img else None
+            
             item['type'] = 'movie' if '/movie/' in item['link'] else 'tv' if '/tv/' in item['link'] else 'unknown'
+            
             return item
         except:
             return None
     
     def close(self):
-        """Close the Chrome driver"""
         if self.driver:
             self.driver.quit()
-            logger.info("✓ Chrome driver closed")
+            logger.info("✓ Chrome closed, bye! 👋")
 
 
 scraper = None
 
 def get_scraper():
-    """Get or create scraper instance"""
     global scraper
     if scraper is None:
         scraper = FlixHQAPI()
@@ -296,14 +333,14 @@ def get_scraper():
 
 @app.route('/', methods=['GET'])
 def home():
-    """API home info"""
     return jsonify({
         'name': 'FlixHQ API',
         'version': '1.0.0',
+        'message': '🎬 Your movie scraper is live!',
         'endpoints': {
             'health': '/api/health',
             'trending': '/api/trending?limit=20',
-            'search': '/api/search?q=keyword&limit=20',
+            'search': '/api/search?q=spiderman',
             'details': '/api/details?url=<movie_url>'
         }
     })
@@ -311,74 +348,101 @@ def home():
 
 @app.route('/api/health', methods=['GET'])
 def health():
-    """Check API health"""
     return jsonify({
         'status': 'ok',
-        'message': 'FlixHQ API is running'
+        'message': '✅ API is running smoothly!'
     })
 
 
 @app.route('/api/trending', methods=['GET'])
 def get_trending():
-    """Return trending movies"""
     try:
         limit = request.args.get('limit', 20, type=int)
         results = get_scraper().scrape_home(limit=limit)
-        return jsonify({'success': True, 'count': len(results), 'data': results})
+        return jsonify({
+            'success': True,
+            'count': len(results),
+            'data': results
+        })
     except Exception as e:
-        logger.error(f"Error in /api/trending: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        logger.error(f"❌ Trending endpoint error: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 
 @app.route('/api/search', methods=['GET'])
 def search():
-    """Search movies by query"""
     try:
         keyword = request.args.get('q', '').strip()
+        
         if not keyword:
-            return jsonify({'success': False, 'error': 'Missing search keyword'}), 400
+            return jsonify({
+                'success': False,
+                'error': 'Bro, give me something to search! 🔍'
+            }), 400
+        
         limit = request.args.get('limit', 20, type=int)
         results = get_scraper().search(keyword, limit=limit)
-        return jsonify({'success': True, 'keyword': keyword, 'count': len(results), 'data': results})
+        
+        return jsonify({
+            'success': True,
+            'keyword': keyword,
+            'count': len(results),
+            'data': results
+        })
     except Exception as e:
-        logger.error(f"Error in /api/search: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        logger.error(f"❌ Search endpoint error: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 
 @app.route('/api/details', methods=['GET'])
 def get_details():
-    """Return movie details and streaming servers"""
     try:
         url = request.args.get('url', '').strip()
+        
         if not url:
-            return jsonify({'success': False, 'error': 'Missing movie URL'}), 400
+            return jsonify({
+                'success': False,
+                'error': 'Need a movie URL bro! 🎬'
+            }), 400
+        
         details = get_scraper().get_details_with_servers(url)
-        return jsonify({'success': True, 'data': details})
+        
+        return jsonify({
+            'success': True,
+            'data': details
+        })
     except Exception as e:
-        logger.error(f"Error in /api/details: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        logger.error(f"❌ Details endpoint error: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 
 if __name__ == '__main__':
     print("=" * 60)
-    print("FlixHQ API - UpCloud & VidCloud Only")
+    print("🎬 FlixHQ API - UpCloud & VidCloud Scraper")
     print("=" * 60)
-    print("\nEndpoints:")
+    print("\n📡 Endpoints:")
     print("  GET /")
     print("  GET /api/health")
     print("  GET /api/trending?limit=20")
     print("  GET /api/search?q=keyword")
     print("  GET /api/details?url=<movie_url>")
     
-    # Railway provides PORT as environment variable
     port = int(os.getenv('PORT', 8080))
-    print(f"\nStarting on port {port}")
+    print(f"\n🚀 Starting server on port {port}")
     print("=" * 60)
     
     try:
-        # Use gunicorn for production (Railway will use CMD from Dockerfile)
         app.run(debug=False, host='0.0.0.0', port=port)
     except KeyboardInterrupt:
-        print("\nShutting down...")
+        print("\n👋 Shutting down...")
         if scraper:
             scraper.close()
