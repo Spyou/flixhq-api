@@ -2,5 +2,5 @@ services:
   - type: web
     name: flixhq-api
     env: python
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "gunicorn flixhq_api:app"
+    buildCommand: bash .render-build.sh
+    startCommand: gunicorn flixhq_api:app
