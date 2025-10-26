@@ -16,7 +16,6 @@ import logging
 import re
 import os
 import sys
-import requests
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -110,42 +109,9 @@ class FlixHQAPI:
             logger.error(f"❌ Search failed: {e}")
             return []
     
-    def _get_stream_url_from_ajax(self, ajax_url):
-        """
-        This dude takes the ajax URL and gets the real streaming link 💪
-        """
-        try:
-            logger.info(f"🔗 Fetching real stream URL from ajax...")
-            
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Referer': 'https://flixhq-tv.lol/',
-                'X-Requested-With': 'XMLHttpRequest'
-            }
-            
-            response = requests.get(ajax_url, headers=headers, timeout=10)
-            
-            if response.status_code == 200:
-                data = response.json()
-                
-                if 'link' in data:
-                    stream_url = data['link']
-                    logger.info(f"✓ Got real stream URL! 🎉")
-                    return stream_url
-                else:
-                    logger.warning(f"⚠️ No 'link' in ajax response")
-                    return ajax_url
-            else:
-                logger.warning(f"⚠️ Ajax failed with status {response.status_code}")
-                return ajax_url
-                
-        except Exception as e:
-            logger.error(f"❌ Ajax fetch failed: {e}")
-            return ajax_url
-    
     def get_details_with_servers(self, movie_url):
         try:
-            logger.info(f"📽️ Getting movie details...")
+            logger.info(f"📽️ Getting movie details and servers...")
             self.driver.get(movie_url)
             time.sleep(5)
             
@@ -176,125 +142,75 @@ class FlixHQAPI:
             stream_servers = []
             
             try:
-                logger.info("🎥 Hunting for UpCloud, VidCloud, and MegaCloud...")
+                logger.info("🎥 Looking for UpCloud, VidCloud, and MegaCloud servers...")
                 
                 try:
                     WebDriverWait(self.driver, 10).until(
                         EC.presence_of_element_located((By.CSS_SELECTOR, "[class*='server'], [data-id]"))
                     )
                 except:
-                    logger.info("⏳ Servers taking time to load, chill...")
+                    logger.info("⏳ Waiting for servers to load...")
                 
                 self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(2)
+                time.sleep(3)
                 
                 soup = BeautifulSoup(self.driver.page_source, 'html.parser')
                 
-                all_elements = soup.find_all(['a', 'button', 'div', 'li', 'span'])
+                target_servers = ['upcloud', 'vidcloud', 'megacloud']
+                server_links = soup.find_all(['a', 'button', 'div'], attrs={'data-id': True})
                 
-                for element in all_elements:
-                    element_text = element.get_text(strip=True).lower()
-                    element_classes = ' '.join(element.get('class', [])).lower()
-                    
-                    is_target_server = any(keyword in element_text or keyword in element_classes 
-                                          for keyword in ['upcloud', 'vidcloud', 'megacloud'])
-                    
-                    if is_target_server:
-                        data_id = element.get('data-id') or element.get('data-linkid') or element.get('href')
+                for element in server_links:
+                    try:
+                        server_text = element.get_text(strip=True).lower()
+                        data_id = element.get('data-id')
                         
-                        if data_id:
-                            if 'upcloud' in element_text:
-                                server_name = 'UpCloud'
-                            elif 'vidcloud' in element_text:
-                                server_name = 'VidCloud'
-                            elif 'megacloud' in element_text:
-                                server_name = 'MegaCloud'
-                            else:
-                                continue
-                            
-                            if data_id.startswith('/'):
-                                data_id = f"https://flixhq-tv.lol{data_id}"
-                            elif not data_id.startswith('http') and data_id.isdigit():
-                                ajax_url = f"https://flixhq-tv.lol/ajax/episode/servers/{data_id}"
-                                data_id = self._get_stream_url_from_ajax(ajax_url)
-                            
-                            stream_servers.append({
-                                'server': server_name,
-                                'url': data_id,
-                                'type': 'server_link'
-                            })
-                            
-                            logger.info(f"✓ Found {server_name}!")
-                
-                iframes = soup.find_all('iframe')
-                for iframe in iframes:
-                    iframe_src = iframe.get('src') or iframe.get('data-src')
-                    if iframe_src:
-                        if not iframe_src.startswith('http'):
-                            iframe_src = f"https:{iframe_src}" if iframe_src.startswith('//') else iframe_src
+                        if not data_id:
+                            continue
                         
                         server_name = None
-                        if 'upcloud' in iframe_src.lower():
+                        if 'upcloud' in server_text:
                             server_name = 'UpCloud'
-                        elif 'vidcloud' in iframe_src.lower():
+                        elif 'vidcloud' in server_text:
                             server_name = 'VidCloud'
-                        elif 'megacloud' in iframe_src.lower():
+                        elif 'megacloud' in server_text:
                             server_name = 'MegaCloud'
                         
                         if server_name:
-                            stream_servers.append({
-                                'server': server_name,
-                                'url': iframe_src,
-                                'type': 'iframe'
-                            })
+                            watch_url = f"{movie_url}.{data_id}"
                             
-                            logger.info(f"✓ Found iframe: {server_name}")
-                
-                try:
-                    js_servers = self.driver.execute_script("""
-                        var servers = [];
-                        document.querySelectorAll('[data-id], [data-linkid]').forEach(function(el) {
-                            var text = (el.innerText || el.textContent || '').toLowerCase();
-                            var dataId = el.getAttribute('data-id') || el.getAttribute('data-linkid');
+                            logger.info(f"🎬 Found {server_name}, navigating to watch page...")
+                            self.driver.execute_script(f"window.open('{watch_url}', '_blank');")
                             
-                            if (text.includes('upcloud') || text.includes('vidcloud') || text.includes('megacloud')) {
-                                servers.push({
-                                    name: el.innerText.trim(),
-                                    id: dataId
-                                });
-                            }
-                        });
-                        return servers;
-                    """)
+                            self.driver.switch_to.window(self.driver.window_handles[-1])
+                            time.sleep(3)
+                            
+                            watch_soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+                            iframe = watch_soup.find('iframe')
+                            
+                            if iframe:
+                                iframe_src = iframe.get('src') or iframe.get('data-src')
+                                if iframe_src:
+                                    if not iframe_src.startswith('http'):
+                                        iframe_src = f"https:{iframe_src}" if iframe_src.startswith('//') else iframe_src
+                                    
+                                    stream_servers.append({
+                                        'server': server_name,
+                                        'url': iframe_src,
+                                        'type': 'iframe'
+                                    })
+                                    
+                                    logger.info(f"✓ Extracted {server_name} stream! 🎉")
+                            
+                            self.driver.close()
+                            self.driver.switch_to.window(self.driver.window_handles[0])
                     
-                    for js_server in js_servers:
-                        server_id = js_server['id']
-                        
-                        if server_id and server_id.isdigit():
-                            ajax_url = f"https://flixhq-tv.lol/ajax/episode/servers/{server_id}"
-                            server_url = self._get_stream_url_from_ajax(ajax_url)
-                        else:
-                            server_url = server_id
-                        
-                        server_text_lower = js_server['name'].lower()
-                        if 'upcloud' in server_text_lower:
-                            server_name = 'UpCloud'
-                        elif 'vidcloud' in server_text_lower:
-                            server_name = 'VidCloud'
-                        elif 'megacloud' in server_text_lower:
-                            server_name = 'MegaCloud'
-                        else:
-                            continue
-                        
-                        stream_servers.append({
-                            'server': server_name,
-                            'url': server_url,
-                            'type': 'javascript'
-                        })
-                        logger.info(f"✓ JS found: {server_name}")
-                        
-                except Exception as js_error:
-                    logger.warning(f"⚠️ JavaScript extraction failed: {js_error}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Failed to extract server: {e}")
+                        try:
+                            self.driver.switch_to.window(self.driver.window_handles[0])
+                        except:
+                            pass
+                        continue
                 
             except Exception as server_error:
                 logger.error(f"❌ Server extraction failed: {server_error}")
@@ -309,7 +225,7 @@ class FlixHQAPI:
             details['servers'] = unique_servers
             details['server_count'] = len(unique_servers)
             
-            logger.info(f"🎉 Total servers found: {len(unique_servers)}")
+            logger.info(f"🎉 Total servers extracted: {len(unique_servers)}")
             
             return details
             
@@ -390,8 +306,8 @@ def get_scraper():
 def home():
     return jsonify({
         'name': 'FlixHQ API',
-        'version': '1.0.0',
-        'message': '🎬 Your movie scraper is live!',
+        'version': '2.0.0',
+        'message': '🎬 Your movie scraper is live with REAL streaming sources!',
         'supported_servers': ['UpCloud', 'VidCloud', 'MegaCloud'],
         'endpoints': {
             'health': '/api/health',
@@ -483,7 +399,7 @@ def get_details():
 
 if __name__ == '__main__':
     print("=" * 60)
-    print("🎬 FlixHQ API - UpCloud, VidCloud & MegaCloud")
+    print("🎬 FlixHQ API v2.0 - Real Streaming Sources!")
     print("=" * 60)
     print("\n📡 Endpoints:")
     print("  GET /")
