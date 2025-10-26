@@ -111,131 +111,125 @@ class FlixHQAPI:
     
     def get_details_with_servers(self, movie_url):
         try:
-            logger.info(f"📽️ Getting movie details and servers...")
+            logger.info(f"📽️ Getting movie with stream sources...")
             self.driver.get(movie_url)
             time.sleep(5)
             
             soup = BeautifulSoup(self.driver.page_source, 'html.parser')
-            details = {}
+            details = self._extract_basic_details(soup)
             
-            desc_elem = soup.find(class_=lambda x: x and 'description' in str(x).lower())
-            if desc_elem:
-                details['description'] = desc_elem.get_text(strip=True)[:500]
-            else:
-                meta_desc = soup.find('meta', attrs={'name': 'description'})
-                details['description'] = meta_desc.get('content', None) if meta_desc else None
+            stream_sources = []
             
-            year_elem = soup.find(class_=lambda x: x and 'year' in str(x).lower())
-            if year_elem:
-                year_match = re.search(r'\b(19\d{2}|20[0-3]\d)\b', year_elem.get_text())
-                details['year'] = year_match.group(1) if year_match else None
-            else:
-                details['year'] = None
+            logger.info("🎥 Looking for ALL server buttons (debug mode)...")
             
-            rating_elem = soup.find(class_=lambda x: x and ('rating' in str(x).lower() or 'imdb' in str(x).lower()))
-            if rating_elem:
-                rating_match = re.search(r'(\d+\.?\d*)', rating_elem.get_text())
-                details['rating'] = rating_match.group(1) if rating_match else None
-            else:
-                details['rating'] = None
-            
-            stream_servers = []
+            time.sleep(3)
+            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(2)
             
             try:
-                logger.info("🎥 Looking for UpCloud, VidCloud, and MegaCloud servers...")
+                server_buttons = self.driver.find_elements(By.CSS_SELECTOR, 
+                    'a[data-id], button[data-id], li[data-id], div[data-id]')
                 
-                try:
-                    WebDriverWait(self.driver, 10).until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, "[class*='server'], [data-id]"))
-                    )
-                except:
-                    logger.info("⏳ Waiting for servers to load...")
+                logger.info(f"Found {len(server_buttons)} buttons with data-id")
                 
-                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(3)
-                
-                soup = BeautifulSoup(self.driver.page_source, 'html.parser')
-                
-                target_servers = ['upcloud', 'vidcloud', 'megacloud']
-                server_links = soup.find_all(['a', 'button', 'div'], attrs={'data-id': True})
-                
-                for element in server_links:
+                for idx, button in enumerate(server_buttons):
                     try:
-                        server_text = element.get_text(strip=True).lower()
-                        data_id = element.get('data-id')
+                        button_text = button.text.strip()
+                        data_id = button.get_attribute('data-id')
+                        
+                        logger.info(f"🔍 Button {idx+1}: text='{button_text}', data-id='{data_id}'")
                         
                         if not data_id:
                             continue
                         
-                        server_name = None
-                        if 'upcloud' in server_text:
-                            server_name = 'UpCloud'
-                        elif 'vidcloud' in server_text:
-                            server_name = 'VidCloud'
-                        elif 'megacloud' in server_text:
-                            server_name = 'MegaCloud'
-                        
-                        if server_name:
-                            watch_url = f"{movie_url}.{data_id}"
+                        if button_text:
+                            logger.info(f"🎬 Clicking button '{button_text}'...")
                             
-                            logger.info(f"🎬 Found {server_name}, navigating to watch page...")
-                            self.driver.execute_script(f"window.open('{watch_url}', '_blank');")
+                            try:
+                                self.driver.execute_script("arguments[0].click();", button)
+                                time.sleep(4)
+                                
+                                current_soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+                                iframe = current_soup.find('iframe')
+                                
+                                if iframe:
+                                    iframe_src = iframe.get('src') or iframe.get('data-src')
+                                    if iframe_src:
+                                        if not iframe_src.startswith('http'):
+                                            iframe_src = f"https:{iframe_src}" if iframe_src.startswith('//') else iframe_src
+                                        
+                                        server_name = button_text or 'Unknown Server'
+                                        
+                                        stream_sources.append({
+                                            'server': server_name,
+                                            'url': iframe_src,
+                                            'type': 'iframe'
+                                        })
+                                        
+                                        logger.info(f"✓ Got {server_name} stream! 🎉")
+                                else:
+                                    logger.warning(f"⚠️ No iframe found after clicking {button_text}")
                             
-                            self.driver.switch_to.window(self.driver.window_handles[-1])
-                            time.sleep(3)
-                            
-                            watch_soup = BeautifulSoup(self.driver.page_source, 'html.parser')
-                            iframe = watch_soup.find('iframe')
-                            
-                            if iframe:
-                                iframe_src = iframe.get('src') or iframe.get('data-src')
-                                if iframe_src:
-                                    if not iframe_src.startswith('http'):
-                                        iframe_src = f"https:{iframe_src}" if iframe_src.startswith('//') else iframe_src
-                                    
-                                    stream_servers.append({
-                                        'server': server_name,
-                                        'url': iframe_src,
-                                        'type': 'iframe'
-                                    })
-                                    
-                                    logger.info(f"✓ Extracted {server_name} stream! 🎉")
-                            
-                            self.driver.close()
-                            self.driver.switch_to.window(self.driver.window_handles[0])
+                            except Exception as click_err:
+                                logger.warning(f"⚠️ Failed to click {button_text}: {click_err}")
                     
-                    except Exception as e:
-                        logger.warning(f"⚠️ Failed to extract server: {e}")
-                        try:
-                            self.driver.switch_to.window(self.driver.window_handles[0])
-                        except:
-                            pass
+                    except Exception as btn_err:
+                        logger.warning(f"⚠️ Button error: {btn_err}")
                         continue
-                
-            except Exception as server_error:
-                logger.error(f"❌ Server extraction failed: {server_error}")
             
-            unique_servers = []
+            except Exception as selenium_err:
+                logger.error(f"❌ Server extraction failed: {selenium_err}")
+            
+            unique_sources = []
             seen_urls = set()
-            for server in stream_servers:
-                if server['url'] not in seen_urls:
-                    seen_urls.add(server['url'])
-                    unique_servers.append(server)
+            for source in stream_sources:
+                if source['url'] not in seen_urls:
+                    seen_urls.add(source['url'])
+                    unique_sources.append(source)
             
-            details['servers'] = unique_servers
-            details['server_count'] = len(unique_servers)
+            details['sources'] = unique_sources
+            details['source_count'] = len(unique_sources)
             
-            logger.info(f"🎉 Total servers extracted: {len(unique_servers)}")
+            logger.info(f"🎉 Total sources found: {len(unique_sources)}")
             
             return details
             
         except Exception as e:
             logger.error(f"❌ Details extraction failed: {e}")
             return {
-                'error': str(e),
-                'servers': [],
-                'server_count': 0
+                'description': None,
+                'year': None,
+                'rating': None,
+                'sources': [],
+                'source_count': 0,
+                'error': str(e)
             }
+    
+    def _extract_basic_details(self, soup):
+        details = {}
+        
+        desc_elem = soup.find(class_=lambda x: x and 'description' in str(x).lower())
+        if desc_elem:
+            details['description'] = desc_elem.get_text(strip=True)[:500]
+        else:
+            meta_desc = soup.find('meta', attrs={'name': 'description'})
+            details['description'] = meta_desc.get('content', None) if meta_desc else None
+        
+        year_elem = soup.find(class_=lambda x: x and 'year' in str(x).lower())
+        if year_elem:
+            year_match = re.search(r'\b(19\d{2}|20[0-3]\d)\b', year_elem.get_text())
+            details['year'] = year_match.group(1) if year_match else None
+        else:
+            details['year'] = None
+        
+        rating_elem = soup.find(class_=lambda x: x and ('rating' in str(x).lower() or 'imdb' in str(x).lower()))
+        if rating_elem:
+            rating_match = re.search(r'(\d+\.?\d*)', rating_elem.get_text())
+            details['rating'] = rating_match.group(1) if rating_match else None
+        else:
+            details['rating'] = None
+        
+        return details
     
     def _extract_items(self, soup):
         items = []
@@ -306,9 +300,8 @@ def get_scraper():
 def home():
     return jsonify({
         'name': 'FlixHQ API',
-        'version': '2.0.0',
-        'message': '🎬 Your movie scraper is live with REAL streaming sources!',
-        'supported_servers': ['UpCloud', 'VidCloud', 'MegaCloud'],
+        'version': '3.1.0 DEBUG',
+        'message': '🎬 Debug mode - extracts ALL servers!',
         'endpoints': {
             'health': '/api/health',
             'trending': '/api/trending?limit=20',
@@ -322,7 +315,7 @@ def home():
 def health():
     return jsonify({
         'status': 'ok',
-        'message': '✅ API is running smoothly!'
+        'message': '✅ API running in debug mode!'
     })
 
 
@@ -337,7 +330,7 @@ def get_trending():
             'data': results
         })
     except Exception as e:
-        logger.error(f"❌ Trending endpoint error: {e}")
+        logger.error(f"❌ Trending error: {e}")
         return jsonify({
             'success': False,
             'error': str(e)
@@ -352,7 +345,7 @@ def search():
         if not keyword:
             return jsonify({
                 'success': False,
-                'error': 'Bro, give me something to search! 🔍'
+                'error': 'Give me something to search bro! 🔍'
             }), 400
         
         limit = request.args.get('limit', 20, type=int)
@@ -365,7 +358,7 @@ def search():
             'data': results
         })
     except Exception as e:
-        logger.error(f"❌ Search endpoint error: {e}")
+        logger.error(f"❌ Search error: {e}")
         return jsonify({
             'success': False,
             'error': str(e)
@@ -390,7 +383,7 @@ def get_details():
             'data': details
         })
     except Exception as e:
-        logger.error(f"❌ Details endpoint error: {e}")
+        logger.error(f"❌ Details error: {e}")
         return jsonify({
             'success': False,
             'error': str(e)
@@ -399,7 +392,7 @@ def get_details():
 
 if __name__ == '__main__':
     print("=" * 60)
-    print("🎬 FlixHQ API v2.0 - Real Streaming Sources!")
+    print("🎬 FlixHQ API v3.1 - DEBUG MODE")
     print("=" * 60)
     print("\n📡 Endpoints:")
     print("  GET /")
@@ -407,14 +400,15 @@ if __name__ == '__main__':
     print("  GET /api/trending?limit=20")
     print("  GET /api/search?q=keyword")
     print("  GET /api/details?url=<movie_url>")
+    print("\n🔍 Will show ALL button texts and data-ids!")
     
     port = int(os.getenv('PORT', 8080))
-    print(f"\n🚀 Starting server on port {port}")
+    print(f"\n🚀 Starting on port {port}")
     print("=" * 60)
     
     try:
         app.run(debug=False, host='0.0.0.0', port=port)
     except KeyboardInterrupt:
-        print("\n👋 Shutting down, catch you later!")
+        print("\n👋 Shutting down!")
         if scraper:
             scraper.close()
