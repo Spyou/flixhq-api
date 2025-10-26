@@ -125,27 +125,38 @@ class FlixHQAPI:
             return []
     
     def get_tmdb_id(self, title, year=None):
-        """Get TMDB ID for VidSrc"""
+        """Get TMDB ID using jumpfreedom.com (100% FREE, NO API KEY!)"""
         try:
             clean_title = self.clean_title(title)
-            api_key = os.getenv('TMDB_API_KEY', 'fab792d6c5936a7332045ca4565c7353')
+            logger.info(f"🔍 Searching jumpfreedom.com: {clean_title}")
             
-            params = {
-                'api_key': api_key,
-                'query': clean_title,
-                'year': year
-            }
+            # jumpfreedom.com = Free TMDB proxy
+            search_url = "https://jumpfreedom.com/3/search/movie"
+            params = {'query': clean_title}
+            if year:
+                params['year'] = year
             
-            response = requests.get('https://api.themoviedb.org/3/search/movie', params=params, timeout=5)
+            response = requests.get(search_url, params=params, timeout=10)
+            
             if response.status_code == 200:
                 data = response.json()
-                if data.get('results'):
-                    tmdb_id = data['results'][0]['id']
-                    logger.info(f"✓ TMDB ID: {tmdb_id}")
+                results = data.get('results', [])
+                
+                if results:
+                    tmdb_id = results[0]['id']
+                    logger.info(f"✓ Found TMDB ID: {tmdb_id}")
                     return tmdb_id
+                else:
+                    logger.warning(f"No results for: {clean_title}")
+            else:
+                logger.warning(f"API error: {response.status_code}")
+                
         except Exception as e:
-            logger.warning(f"TMDB lookup failed: {e}")
+            logger.error(f"jumpfreedom.com failed: {e}")
+        
         return None
+
+
     
     def get_vidsrc_streams(self, tmdb_id=None, title=None, year=None):
         """Generate VidSrc URLs"""
